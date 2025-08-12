@@ -1,9 +1,0 @@
-In consideration of and as a condition of Datalabs AI Private Limited employing the employee and Datalabs AI Private Limited providing the confidential information to the employee in addition to other valuable considerations, the receipt and sufficiency of which consideration is hereby acknowledged, the parties of this agreement agree as follows
-
-1.	Company’s Trade Secrets
-In the performance of Employee's job duties with Company, Employee will be exposed to Company's Confidential Information. "Confidential Information" means information or material that is commercially valuable to Company and not generally known or readily ascertainable in the industry. This includes, but is not limited to:
-a)	technical information concerning Company's products and services, including product know-how, formulas, designs, devices, diagrams, software code, test results, processes, inventions, research projects and product development, technical memoranda and correspondence;
-b)	information concerning Company's business, including cost information, profits, sales information, accounting and unpublished financial information, business plans, markets and marketing methods, customer lists and customer information, purchasing techniques, supplier lists and supplier information and advertising strategies;
-c)	information concerning Company's employees, including salaries, strengths, weaknesses and skills;
-d)	information submitted by Company's customers, suppliers, employees, consultants or co-venture partners with Company for study, evaluation or use; and
-e)	any other information not generally known to the public which, if misused or disclosed, could reasonably be expected to adversely affect Company's business.
