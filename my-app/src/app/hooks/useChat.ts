@@ -1,0 +1,99 @@
+import { useState } from 'react';
+
+const API_BASE_URL = 'http://localhost:8000';
+
+interface UseChatProps {
+  onMessage: (type: 'bot' | 'user', content: string, isFile?: boolean, updateId?: number) => any;
+  isDocumentUploaded: boolean;
+}
+
+export const useChat = ({ onMessage, isDocumentUploaded }: UseChatProps) => {
+  const [inputMessage, setInputMessage] = useState<string>('');
+  const [isAsking, setIsAsking] = useState<boolean>(false);
+
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim()) return;
+    
+    if (!isDocumentUploaded) {
+      onMessage('bot', 'Please upload a document first before asking questions.');
+      return;
+    }
+
+    // Add user message
+    onMessage('user', inputMessage);
+    const userQuestion = inputMessage;
+    setInputMessage('');
+    setIsAsking(true);
+
+    try {
+      // Create FormData for the API call
+      const formData = new FormData();
+      formData.append('question', userQuestion);
+
+      const response = await fetch(`${API_BASE_URL}/ask`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      // Create initial bot message for streaming
+      const botMessage = onMessage('bot', '');
+      const botMessageId = botMessage?.id;
+      let accumulatedResponse = '';
+
+      // Read the stream
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedResponse += chunk;
+        
+        // Update the bot message with accumulated response
+        if (botMessageId) {
+          onMessage('bot', accumulatedResponse, false, botMessageId);
+        }
+      }
+
+      // If no content was received, show error message
+      if (!accumulatedResponse.trim()) {
+        onMessage('bot', 'Sorry, I could not process your question.');
+      }
+      
+    } catch (error) {
+      console.error('Error asking question:', error);
+      onMessage('bot', 'Sorry, there was an error processing your question. Please make sure the backend server is running.');
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  return {
+    inputMessage,
+    setInputMessage,
+    isAsking,
+    handleSendMessage,
+    handleKeyPress
+  };
+};
+
+export default useChat;
