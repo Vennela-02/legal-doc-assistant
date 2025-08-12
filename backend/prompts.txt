@@ -1,0 +1,14 @@
+# Zero-shot Prompt
+What are the essential elements of a legal contract?
+
+# Few-shot Prompt
+Q: What is an NDA?
+A: A Non-Disclosure Agreement is a legal contract...
+Q: What is consideration in a contract?
+A: Consideration is the benefit each party receives...
+Q: What is a void contract?
+A: 
+
+# System Prompt-style
+You are a legal expert assistant. Answer concisely and professionally.
+Question: What are the penalties for breach of contract?
