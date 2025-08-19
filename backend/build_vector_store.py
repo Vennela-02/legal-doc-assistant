@@ -1,44 +1,88 @@
-import faiss
-import numpy as np
-import pickle
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from sentence_transformers import SentenceTransformer
 from chunk import chunk_text
 import os
+import uuid
+
+
+COLLECTION_NAME = "legal_chunks"
+EMBEDDER_MODEL = "all-MiniLM-L6-v2"
+
+
+def file_exists(client: QdrantClient, file_name: str) -> bool:
+    """
+    Check if a file_name already exists in Qdrant.
+    """
+    results, _ = client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="file_name", match=MatchValue(value=file_name))]
+        ),
+        limit=1,
+        with_payload=False
+    )
+    return len(results) > 0
+
 
 def build_and_save_index(pages: list):
     """
-    Builds FAISS index and saves both index and chunk metadata.
-
-    Args:
-        pages (list): List of (text, page_number, source) tuples.
+    Builds Qdrant index (collection) and uploads chunks + metadata to Qdrant Cloud.
+    Returns status dict: {"file_name": str, "status": "uploaded"|"skipped"}
     """
-    print("📄 Starting build_and_save_index()")
-    print("📂 Current working directory:", os.getcwd())
+    if not pages:
+        return {"file_name": None, "status": "skipped"}
 
-    # ✅ Convert tuples into dicts
+    file_name = pages[0][2]  # from (text, page, source)
+
+    client = QdrantClient(
+        url=os.getenv("QDRANT_URL"),
+        api_key=os.getenv("QDRANT_API_KEY")
+    )
+
+    # check if file already exists
+    if file_exists(client, file_name):
+        print(f"⚠️ Skipping upload: {file_name} already exists in Qdrant")
+        return {"file_name": file_name, "status": "skipped"}
+
+    # Convert tuples into dicts
     pages_as_dicts = [{"text": t, "page": p, "source": s} for (t, p, s) in pages]
 
-    # Step 1: Chunk the uploaded document(s)
+    # Chunk the uploaded document(s)
     chunks = chunk_text(pages_as_dicts)
-    print(f"🧩 Total chunks created: {len(chunks)}")
 
-    # Step 2: Extract raw text from chunks for embedding
-    texts = [chunk["text"] for chunk in chunks]
+    # Encode using sentence-transformers
+    model = SentenceTransformer(EMBEDDER_MODEL)
+    embeddings = model.encode([c["text"] for c in chunks]).tolist()
 
-    # Step 3: Encode using sentence-transformers
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    embeddings = model.encode(texts)
+    # Create collection if not exists (do not delete existing data)
+    try:
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(size=len(embeddings[0]), distance=Distance.COSINE)
+        )
+    except Exception:
+        pass  # Collection already exists
 
-    # Step 4: Save to FAISS
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings))
+    # Generate a unique file_id for this upload
+    file_id = str(uuid.uuid4())
 
-    # Step 5: Save index and chunks to disk
-    faiss.write_index(index, "legal_index.faiss")
-    with open("legal_chunks.pkl", "wb") as f:
-        pickle.dump(chunks, f)
+    points = [
+        PointStruct(
+            id=str(uuid.uuid4()),
+            vector=embedding,
+            payload={
+                "text": chunk["text"],
+                "page": chunk["page"],
+                "source": chunk["source"],
+                "file_id": file_id,
+                "file_name": chunk["source"]
+            }
+        )
+        for chunk, embedding in zip(chunks, embeddings)
+    ]
 
-    print("💾 Saved index to legal_index.faiss")
-    print("💾 Saved chunks to legal_chunks.pkl")
-    print("✅ Finished build_and_save_index()")
+    client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+    print(f"✅ Chunks uploaded for file_name={file_name}")
+    return {"file_name": file_name, "status": "uploaded"}

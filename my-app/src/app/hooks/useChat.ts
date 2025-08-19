@@ -19,11 +19,16 @@ export const useChat = ({ onMessage, isDocumentUploaded }: UseChatProps) => {
       return;
     }
 
+    // Set thinking state first
+    setIsAsking(true);
+    
     // Add user message
     onMessage('user', inputMessage);
     const userQuestion = inputMessage;
     setInputMessage('');
-    setIsAsking(true);
+
+    // Small delay to ensure UI updates
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     try {
       // Create FormData for the API call

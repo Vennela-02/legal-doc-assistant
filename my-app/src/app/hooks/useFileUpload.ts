@@ -13,8 +13,8 @@ export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadPr
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
 
     // Check for supported file types
     const supportedTypes = [
@@ -26,23 +26,28 @@ export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadPr
       'text/plain'
     ];
 
-    if (!supportedTypes.includes(file.type)) {
-      onMessage('bot', 'Please upload a supported file format: PDF, Word (.doc/.docx), PowerPoint (.ppt/.pptx), or Text (.txt).');
-      return;
-    }
+    // Filter supported files first
+    const validFiles = files.filter(file => {
+      if (!supportedTypes.includes(file.type)) {
+        onMessage('bot', `Please upload a supported file format: PDF, Word (.doc/.docx), PowerPoint (.ppt/.pptx), or Text (.txt). File: ${file.name}`);
+        return false;
+      }
+      return true;
+    });
 
-    // Add upload message with appropriate emoji
-    let emoji = '📄';
-    if (file.type.includes('word')) emoji = '📝';
-    else if (file.type.includes('presentation')) emoji = '📊';
-    else if (file.type === 'text/plain') emoji = '📃';
-    
-    onMessage('user', `${emoji} Uploading: ${file.name}`, true);
+    if (validFiles.length === 0) return;
+
     setIsUploading(true);
-
     try {
+      // Upload all valid files at once (backend supports multiple files)
       const formData = new FormData();
-      formData.append('file', file);
+      validFiles.forEach(file => {
+        formData.append('files', file);
+      });
+
+      // Add upload message
+      const fileNames = validFiles.map(f => f.name).join(', ');
+      onMessage('user', `📄 Uploading: ${fileNames}`, true);
 
       const response = await fetch(`${API_BASE_URL}/upload`, {
         method: 'POST',
@@ -50,18 +55,29 @@ export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadPr
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        onMessage('bot', `❌ Error uploading files`);
+        return;
       }
 
       const data = await response.json();
       
-      // Add success message
-      onMessage('bot', `✅ Document "${file.name}" uploaded and processed successfully! You can now ask questions about it.`);
-      onDocumentUploaded();
+      // Handle response based on backend structure
+      if (data.results && Array.isArray(data.results)) {
+        data.results.forEach((result: any) => {
+          if (result.status === 'uploaded') {
+            onMessage('bot', `✅ Document "${result.file_name}" uploaded and processed successfully!`);
+          } else if (result.status === 'skipped') {
+            onMessage('bot', `⚠️ Document "${result.file_name}" was skipped (already exists)`);
+          }
+        });
+      } else {
+        onMessage('bot', `✅ Documents uploaded successfully! You can now ask questions about them.`);
+      }
       
+      onDocumentUploaded();
     } catch (error) {
       console.error('Error uploading file:', error);
-      onMessage('bot', 'Sorry, there was an error uploading your file. Please make sure the backend server is running and try again.');
+      onMessage('bot', 'Sorry, there was an error uploading your file(s). Please make sure the backend server is running and try again.');
     } finally {
       setIsUploading(false);
     }

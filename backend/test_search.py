@@ -10,7 +10,7 @@ def search_similar_chunks(query: str, top_k: int = 3):
 
     model = SentenceTransformer("all-MiniLM-L6-v2")
     query_vector = model.encode([query])
-    distances, indices = app_state.current_index.search(np.array(query_vector), top_k)
+    distances, indices= app_state.current_index.search(np.array(query_vector), top_k)
 
     matched_chunks = []
     for idx in indices[0]:

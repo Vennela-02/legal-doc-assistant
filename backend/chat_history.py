@@ -25,4 +25,5 @@ def clear_chat_history():
     """
     Clear history when needed (e.g., on new upload).
     """
+    global history
     history.clear()
