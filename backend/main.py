@@ -8,6 +8,11 @@ from retrieval import search_similar_chunks, delete_file_chunks, list_files
 from gemini_setup import stream_answer
 from prompt_utils import format_prompt
 from legalprompt import system_prompt
+from live_news import fetch_legal_news
+from web_scraper import scrape_url
+from fastapi import FastAPI, File, UploadFile, Form
+import re
+url_pattern = re.compile(r'https?://\S+')
 
 app = FastAPI()
 
@@ -42,6 +47,23 @@ async def upload_file(files: list[UploadFile] = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+# GET latest legal news
+@app.get("/news")
+async def get_news(query: str = "law"):
+    return await fetch_legal_news(query)
+
+# POST: scrape from URL
+@app.post("/scrape")
+async def scrape_from_url(url: str = Form(...)):
+    result = await scrape_url(url)
+
+    # Handle blocked/redirected sites
+    if "error" in result and "Redirect" in result["error"]:
+        return {
+            "error": "⚠️ This site blocks web scraping. Please use a supported site or provide another source."
+        }
+
+    return result
 
 
 @app.post("/ask")
@@ -57,11 +79,21 @@ async def ask_question(question: str = Form(...)):
         top_chunks, similarity_score = search_similar_chunks(question)
         history_context = get_chat_context()
 
-        # Handle greetings separately
+        # Handle greetings
         greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
         if question.strip().lower() in greetings:
             greeting_text = "Hello! How can I help you with your uploaded documents today?"
             return StreamingResponse(stream_answer(greeting_text), media_type="text/plain")
+
+        if url_pattern.search(question):
+            url = url_pattern.search(question).group(0)
+            scraped = await scrape_url(url)
+            if "content" in scraped:
+                prompt = f"Summarize and answer based on this webpage:\n\n{scraped['content']}\n\nQuestion: {question}"
+                update_chat_history(question)
+                return StreamingResponse(stream_answer(prompt), media_type="text/plain")
+            else:
+                return JSONResponse({"error": "Failed to scrape URL"})
 
         # Case A: Relevant chunks found
         if top_chunks and similarity_score >= 0.10:
@@ -80,7 +112,8 @@ async def ask_question(question: str = Form(...)):
             prompt = (
                 f"{system_prompt}\n\n"
                 f"{history_context}\n\n"
-                f"{question}\n\n"
+                f"The user asked:\n{question}\n\n"
+                "⚠️ No direct match found in uploaded documents. This answer is based on general legal knowledge."
             )
             update_chat_history(question)
             return StreamingResponse(stream_answer(prompt), media_type="text/plain")
@@ -117,3 +150,6 @@ async def delete_file(file_name: str):
 async def clear_history():
     clear_chat_history()
     return {"message": "Chat history cleared"}
+
+
+

@@ -6,6 +6,7 @@ from PyPDF2 import PdfReader
 from typing import List, Tuple
 from pdf2image import convert_from_bytes
 import pytesseract
+from PIL import Image
 
 def extract_text_from_file(filename: str, content: bytes) -> List[Tuple[str, int, str]]:
     ext = os.path.splitext(filename)[1].lower()
@@ -29,30 +30,44 @@ def extract_text_from_file(filename: str, content: bytes) -> List[Tuple[str, int
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 def extract_text_with_ocr_from_bytes(content: bytes) -> List[Tuple[str, int]]:
-    pages = convert_from_bytes(content, dpi=300,poppler_path=r'C:\Users\Admin\Downloads\Release-24.08.0-0\poppler-24.08.0\Library\bin')
-    ocr_pages = []  # <- define this list here
-
+    """Run OCR on every page and return (text, page_number)."""
+    pages = convert_from_bytes(
+        content, 
+        dpi=300, 
+        poppler_path=r'C:\Users\Admin\Downloads\Release-24.08.0-0\poppler-24.08.0\Library\bin'
+    )
+    ocr_pages = []
     for i, page_img in enumerate(pages):
         text = pytesseract.image_to_string(page_img)
-        ocr_pages.append((text, i + 1))  # Append tuple (text, page number)
-
+        ocr_pages.append((text.strip(), i + 1))
     return ocr_pages
 
+
+
 def extract_text_from_pdf(content: bytes, source: str) -> List[Tuple[str, int, str]]:
+    """Extract text from PDF using PyMuPDF + OCR hybrid approach (merged per page)."""
     pages = []
+
+    #  Extract digital text with PyMuPDF
     with fitz.open(stream=content, filetype="pdf") as doc:
-        for i, page in enumerate(doc):
-            pages.append((page.get_text(), i + 1, source))
-     # Check total extracted text length
-    total_text = "".join([p[0].strip() for p in pages])
-    if len(total_text) < 100:
-        print("Normal PDF extraction returned too little text; falling back to OCR...")
-        # OCR extracts full text as a single string
-        ocr_pages = extract_text_with_ocr_from_bytes(content)
-       
-        pages = [(text, page_num, source) for text, page_num in ocr_pages]
-    else:
-        print("Normal PDF extraction succeeded.")
+        digital_text = [(page.get_text().strip(), i + 1, source) for i, page in enumerate(doc)]
+
+    # Extract OCR text
+    ocr_pages = extract_text_with_ocr_from_bytes(content)
+
+    # Merge per page
+    for (dig_text, page_num, src), (ocr_text, ocr_page_num) in zip(digital_text, ocr_pages):
+        assert page_num == ocr_page_num  # safety check
+        # Combine but avoid duplication
+        if dig_text and ocr_text:
+            merged = dig_text + "\n\n[OCR Extracted]\n" + ocr_text
+        elif dig_text:
+            merged = dig_text
+        else:
+            merged = ocr_text
+        pages.append((merged.strip(), page_num, src))
+
+    print(f"✅ Hybrid extraction complete for {len(pages)} pages.")
     return pages
 
 def extract_text_from_docx(content: bytes, source: str) -> List[Tuple[str, int, str]]:
