@@ -5,9 +5,10 @@ const API_BASE_URL = 'http://localhost:8000';
 interface UseFileUploadProps {
   onMessage: (type: 'bot' | 'user', content: string, isFile?: boolean, updateId?: number) => any;
   onDocumentUploaded: () => void;
+  onRefreshFiles?: () => void;
 }
 
-export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadProps) => {
+export const useFileUpload = ({ onMessage, onDocumentUploaded, onRefreshFiles }: UseFileUploadProps) => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,7 +30,7 @@ export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadPr
     // Filter supported files first
     const validFiles = files.filter(file => {
       if (!supportedTypes.includes(file.type)) {
-        onMessage('bot', `Please upload a supported file format: PDF, Word (.doc/.docx), PowerPoint (.ppt/.pptx), or Text (.txt). File: ${file.name}`);
+        onMessage('bot', `❌ Unsupported file format: ${file.name}. Please upload PDF, Word (.doc/.docx), PowerPoint (.ppt/.pptx), or Text (.txt) files.`);
         return false;
       }
       return true;
@@ -55,7 +56,8 @@ export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadPr
       });
 
       if (!response.ok) {
-        onMessage('bot', `❌ Error uploading files`);
+        const errorData = await response.json().catch(() => ({}));
+        onMessage('bot', `❌ Upload failed: ${errorData.error || 'Unknown error'}`);
         return;
       }
 
@@ -63,23 +65,47 @@ export const useFileUpload = ({ onMessage, onDocumentUploaded }: UseFileUploadPr
       
       // Handle response based on backend structure
       if (data.results && Array.isArray(data.results)) {
+        let uploadedCount = 0;
+        let skippedCount = 0;
+        
         data.results.forEach((result: any) => {
           if (result.status === 'uploaded') {
             onMessage('bot', `✅ Document "${result.file_name}" uploaded and processed successfully!`);
+            uploadedCount++;
           } else if (result.status === 'skipped') {
             onMessage('bot', `⚠️ Document "${result.file_name}" was skipped (already exists)`);
+            skippedCount++;
           }
         });
+
+        // Summary message
+        if (uploadedCount > 0) {
+          onMessage('bot', `🎉 ${uploadedCount} document(s) processed successfully! You can now ask questions about them.`);
+          onDocumentUploaded();
+        }
+        
+        if (skippedCount > 0 && uploadedCount === 0) {
+          onMessage('bot', `ℹ️ All ${skippedCount} document(s) were already uploaded previously.`);
+        }
       } else {
         onMessage('bot', `✅ Documents uploaded successfully! You can now ask questions about them.`);
+        onDocumentUploaded();
       }
       
-      onDocumentUploaded();
+      // Refresh file list after upload
+      if (onRefreshFiles) {
+        await onRefreshFiles();
+      }
+      
     } catch (error) {
       console.error('Error uploading file:', error);
-      onMessage('bot', 'Sorry, there was an error uploading your file(s). Please make sure the backend server is running and try again.');
+      onMessage('bot', '❌ Upload failed. Please make sure the backend server is running and try again.');
     } finally {
       setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 

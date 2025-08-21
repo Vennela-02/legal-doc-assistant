@@ -7,12 +7,7 @@ from build_vector_store import build_and_save_index
 from retrieval import search_similar_chunks, delete_file_chunks, list_files
 from gemini_setup import stream_answer
 from prompt_utils import format_prompt
-
-import os
-from qdrant_client import QdrantClient
-
-
-COLLECTION_NAME = "legal_chunks"
+from legalprompt import system_prompt
 
 app = FastAPI()
 
@@ -29,7 +24,8 @@ app.add_middleware(
 async def root():
     return {"message": "Legal AI Assistant API is running!"}
 
-# UPLOAD FILE
+
+
 @app.post("/upload")
 async def upload_file(files: list[UploadFile] = File(...)):
     try:
@@ -37,7 +33,7 @@ async def upload_file(files: list[UploadFile] = File(...)):
         for file in files:
             content = await file.read()
             page_chunks = extract_text_from_file(file.filename, content)
-            status = build_and_save_index(page_chunks)  # ✅ returns dict
+            status = build_and_save_index(page_chunks)  
             results.append(status)
 
         clear_chat_history()  # reset on new upload
@@ -46,23 +42,29 @@ async def upload_file(files: list[UploadFile] = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# ASK QUESTION
+
+
 @app.post("/ask")
 async def ask_question(question: str = Form(...)):
     try:
         print(f"📨 Question received: {question}")
 
+        # Always check available files
+        files = list_files()
+        print(f"📂 Files available in Qdrant: {files}")
+
         # Search in vector DB
         top_chunks, similarity_score = search_similar_chunks(question)
         history_context = get_chat_context()
 
+        # Handle greetings separately
         greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
         if question.strip().lower() in greetings:
             greeting_text = "Hello! How can I help you with your uploaded documents today?"
             return StreamingResponse(stream_answer(greeting_text), media_type="text/plain")
 
-
-        if top_chunks and similarity_score >= 0.15:
+        # Case A: Relevant chunks found
+        if top_chunks and similarity_score >= 0.10:
             context_parts = []
             for chunk in top_chunks:
                 meta = f"[Source: {chunk['file_name']} - Page {chunk['page']}]"
@@ -73,20 +75,25 @@ async def ask_question(question: str = Form(...)):
             update_chat_history(question)
             return StreamingResponse(stream_answer(prompt), media_type="text/plain")
 
-        # Fallback → general knowledge
-        fallback_prompt = (
-            f"{history_context}\n\n"
-            f"The user asked a legal question not clearly covered in the uploaded documents:\n"
-            f"{question}\n\n"
-            "Please answer using only general legal knowledge and do not guess."
-        )
-        update_chat_history(question)
-        return StreamingResponse(stream_answer(fallback_prompt), media_type="text/plain")
+        # Case B: Files exist but no relevant info
+        if files:
+            prompt = (
+                f"{system_prompt}\n\n"
+                f"{history_context}\n\n"
+                f"{question}\n\n"
+            )
+            update_chat_history(question)
+            return StreamingResponse(stream_answer(prompt), media_type="text/plain")
+
+        # Case C: No files at all
+        return JSONResponse({"message": "⚠️ No legal documents found. Please upload a document to begin."})
 
     except Exception as e:
+        print(f"❌ Error in /ask: {str(e)}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# LIST FILES
+
+
 @app.get("/files")
 async def get_files():
     try:
@@ -94,7 +101,8 @@ async def get_files():
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# DELETE FILE BY NAME
+
+
 @app.delete("/delete/{file_name}")
 async def delete_file(file_name: str):
     try:
@@ -104,8 +112,8 @@ async def delete_file(file_name: str):
         return JSONResponse(status_code=500, content={"error": f"Error deleting file: {str(e)}"})
 
 
+
 @app.delete("/clear")
 async def clear_history():
     clear_chat_history()
     return {"message": "Chat history cleared"}
-

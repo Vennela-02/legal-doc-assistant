@@ -13,7 +13,7 @@ EMBEDDER_MODEL = "all-MiniLM-L6-v2"
 # MULTI-DOCUMENT SEARCH
 def search_similar_chunks(
     query: str,
-    top_k: int = 3
+    top_k: int = 10
 ) -> Tuple[List[Dict[str, Any]], float]:
     """
     Vector search across ALL documents.
@@ -26,16 +26,16 @@ def search_similar_chunks(
     model = SentenceTransformer(EMBEDDER_MODEL)
     query_vec = model.encode([query]).tolist()[0]
 
-    # Expand context if summarization requested
-    if "summarize" in query.lower():
-        top_k = 30
-
-    results = client.search(
-        collection_name=COLLECTION_NAME,
-        query_vector=query_vec,
-        limit=top_k,
-        with_payload=True
-    )
+    try:
+        results = client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=query_vec,
+            limit=top_k,
+            with_payload=True
+        )
+    except Exception as e:
+        print(f"❌ Qdrant search error: {e}")
+        return [], 0.0
 
     chunks, scores = [], []
     for r in results:
@@ -94,4 +94,3 @@ def delete_file_chunks(file_name: str) -> None:
         ),
         wait=True
     )
-

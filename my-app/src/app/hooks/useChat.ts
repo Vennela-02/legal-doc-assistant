@@ -14,8 +14,15 @@ export const useChat = ({ onMessage, isDocumentUploaded }: UseChatProps) => {
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
     
-    if (!isDocumentUploaded) {
-      onMessage('bot', 'Please upload a document first before asking questions.');
+    // Check if it's a greeting - allow these even without documents
+    const greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"];
+    const isGreeting = greetings.some(greeting => 
+      inputMessage.trim().toLowerCase() === greeting
+    );
+
+    // Only block non-greeting questions if no documents uploaded
+    if (!isDocumentUploaded && !isGreeting) {
+      onMessage('bot', '⚠️ No legal documents found. Please upload a document to begin.');
       return;
     }
 
@@ -41,7 +48,22 @@ export const useChat = ({ onMessage, isDocumentUploaded }: UseChatProps) => {
       });
 
       if (!response.ok) {
+        // Handle different error responses
+        if (response.status === 500) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Server error occurred');
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Check if response is JSON (no documents case) or streaming
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType?.includes('application/json')) {
+        // Handle JSON response (no documents case)
+        const data = await response.json();
+        onMessage('bot', data.message || 'No response received');
+        return;
       }
 
       // Handle streaming response
@@ -79,7 +101,8 @@ export const useChat = ({ onMessage, isDocumentUploaded }: UseChatProps) => {
       
     } catch (error) {
       console.error('Error asking question:', error);
-      onMessage('bot', 'Sorry, there was an error processing your question. Please make sure the backend server is running.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      onMessage('bot', `Sorry, there was an error: ${errorMessage}. Please make sure the backend server is running.`);
     } finally {
       setIsAsking(false);
     }

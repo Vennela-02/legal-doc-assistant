@@ -9,9 +9,10 @@ interface FileItem {
 
 interface UseFileManagementProps {
   onMessage: (type: 'bot' | 'user', content: string, isFile?: boolean, updateId?: number) => any;
+  onDocumentStateChange?: (hasFiles: boolean) => void;
 }
 
-export const useFileManagement = ({ onMessage }: UseFileManagementProps) => {
+export const useFileManagement = ({ onMessage, onDocumentStateChange }: UseFileManagementProps) => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
@@ -23,14 +24,25 @@ export const useFileManagement = ({ onMessage }: UseFileManagementProps) => {
       const data = await response.json();
       
       if (response.ok) {
-        setFiles(Array.isArray(data) ? data : []);
+        const fileList = Array.isArray(data) ? data : [];
+        setFiles(fileList);
+        // Notify about document state change
+        if (onDocumentStateChange) {
+          onDocumentStateChange(fileList.length > 0);
+        }
       } else {
         console.error('Failed to fetch files:', data.error);
         setFiles([]);
+        if (onDocumentStateChange) {
+          onDocumentStateChange(false);
+        }
       }
     } catch (error) {
       console.error('Error fetching files:', error);
       setFiles([]);
+      if (onDocumentStateChange) {
+        onDocumentStateChange(false);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -47,7 +59,7 @@ export const useFileManagement = ({ onMessage }: UseFileManagementProps) => {
 
       if (response.ok) {
         onMessage('bot', `🗑️ File "${fileName}" deleted successfully.`);
-        await fetchFiles(); // Refresh file list
+        await fetchFiles(); // Refresh file list and update document state
         return { success: true, message: result.message };
       } else {
         throw new Error(result.error || 'Delete failed');

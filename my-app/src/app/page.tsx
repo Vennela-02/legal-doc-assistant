@@ -18,7 +18,12 @@ import { useChatHistory } from './hooks/useChatHistory';
 
 export default function Home() {
   const { messages, addMessage, clearMessages, messagesEndRef } = useMessages();
-  const { isDocumentUploaded, markDocumentAsUploaded } = useDocumentState();
+  
+  const { files, isLoading: isLoadingFiles, isDeleting, deleteFile, fetchFiles } = useFileManagement({
+    onMessage: addMessage
+  });
+
+  const { isDocumentUploaded } = useDocumentState(files);
   
   const {
     isUploading,
@@ -31,7 +36,8 @@ export default function Home() {
     triggerFileInput
   } = useFileUpload({
     onMessage: addMessage,
-    onDocumentUploaded: markDocumentAsUploaded
+    onDocumentUploaded: () => {}, // Document state now managed by file list
+    onRefreshFiles: fetchFiles
   });
 
   const {
@@ -43,10 +49,6 @@ export default function Home() {
   } = useChat({
     onMessage: addMessage,
     isDocumentUploaded
-  });
-
-  const { files, isLoading: isLoadingFiles, isDeleting, deleteFile, fetchFiles } = useFileManagement({
-    onMessage: addMessage
   });
 
   const { clearHistory, clearAll, isClearing, isClearingAll } = useChatHistory({
@@ -177,7 +179,7 @@ export default function Home() {
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900">Legal AI Assistant</h2>
                   <p className="text-sm text-gray-500">
-                    {isDocumentUploaded ? '📄 Document ready' : 'Upload a document to get started'}
+                    {isDocumentUploaded ? `📄 ${files.length} document(s) ready` : 'Upload a document to get started'}
                   </p>
                 </div>
                 {(isUploading || isAsking) && (
@@ -240,15 +242,15 @@ export default function Home() {
                   onKeyPress={handleKeyPress}
                   placeholder={
                     isDocumentUploaded 
-                      ? "Ask a question about your document..." 
-                      : "Upload a document first..."
+                      ? "Ask a question about your documents..." 
+                      : "Say hi or upload a document to begin..."
                   }
                   className="flex-1"
                   disabled={isAsking}
                 />
                 <Button
                   onClick={handleSendMessage}
-                  disabled={!inputMessage.trim() || isAsking || !isDocumentUploaded}
+                  disabled={!inputMessage.trim() || isAsking}
                   size="icon"
                 >
                   {isAsking ? (
