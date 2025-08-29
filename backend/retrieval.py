@@ -5,8 +5,12 @@ from sentence_transformers import SentenceTransformer
 import os
 from models import ChunkMetadata 
 from qdrant_client.models import Filter, FilterSelector
+from logger import logger
 
-COLLECTION_NAME = "legal_chunks"
+
+def get_collection_name() -> str:
+    return os.getenv("QDRANT_COLLECTION", "legal_chunks")
+
 EMBEDDER_MODEL = "all-MiniLM-L6-v2"
 
 
@@ -28,13 +32,13 @@ def search_similar_chunks(
 
     try:
         results = client.search(
-            collection_name=COLLECTION_NAME,
+            collection_name=get_collection_name(),
             query_vector=query_vec,
             limit=top_k,
             with_payload=True
         )
     except Exception as e:
-        print(f"❌ Qdrant search error: {e}")
+        logger.exception(f"❌ Qdrant search error: {e}")
         return [], 0.0
 
     chunks, scores = [], []
@@ -44,7 +48,7 @@ def search_similar_chunks(
             chunks.append(validated.dict())
             scores.append(r.score)
         except Exception as e:
-            print(f"⚠️ Skipping invalid payload: {e}")
+            logger.exception(f"⚠️ Skipping invalid payload: {e}")
 
     return chunks, (max(scores) if scores else 0.0)
 
@@ -60,7 +64,7 @@ def list_files(limit: int = 5000) -> List[Dict[str, str]]:
     )
 
     points, _ = client.scroll(
-        collection_name=COLLECTION_NAME,
+        collection_name=get_collection_name(),
         with_payload=True,
         limit=limit
     )
@@ -71,22 +75,19 @@ def list_files(limit: int = 5000) -> List[Dict[str, str]]:
             if validated.file_id not in seen:
                 seen[validated.file_id] = validated.file_name
         except Exception as e:
-            print(f"⚠️ Skipping invalid payload: {e}")
+            logger.exception(f"⚠️ Skipping invalid payload: {e}")
 
     return [{"file_id": fid, "file_name": name} for fid, name in seen.items()]
 
 
 # DELETE BY FILE NAME
 def delete_file_chunks(file_name: str) -> None:
-    """
-    Delete all chunks belonging to a given file_name.
-    """
     client = QdrantClient(
         url=os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY")
     )
-    client.delete(
-        collection_name=COLLECTION_NAME,
+    result = client.delete(
+        collection_name=get_collection_name(),
         points_selector=FilterSelector(
             filter=Filter(
                 must=[FieldCondition(key="file_name", match=MatchValue(value=file_name))]
@@ -94,3 +95,4 @@ def delete_file_chunks(file_name: str) -> None:
         ),
         wait=True
     )
+    logger.info(f"🗑️ Delete result: {result}")

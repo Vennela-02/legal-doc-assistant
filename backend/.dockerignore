@@ -1,0 +1,18 @@
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# virtual env
+.venv/
+
+# logs
+logs/
+*.log
+
+# local files
+.env
+temp.docx
+*.pdf
+*.docx
+*.pptx

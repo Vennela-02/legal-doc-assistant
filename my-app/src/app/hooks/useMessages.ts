@@ -31,16 +31,17 @@ export const useMessages = () => {
   const addMessage = (type: 'bot' | 'user', content: string, isFile: boolean = false, updateId?: number): Message | undefined => {
     if (updateId) {
       // Update existing message for streaming
+      let updatedMessage: Message | undefined;
       setMessages(prev => 
-        prev.map(msg => 
-          msg.id === updateId 
-            ? { ...msg, content }
-            : msg
-        )
+        prev.map(msg => {
+          if (msg.id === updateId) {
+            updatedMessage = { ...msg, content };
+            return updatedMessage;
+          }
+          return msg;
+        })
       );
-      // Return the updated message (we need to find it from current state)
-      const currentMessages = messages;
-      return currentMessages.find(msg => msg.id === updateId);
+      return updatedMessage;
     } else {
       // Create new message with unique ID
       const newMessage = {

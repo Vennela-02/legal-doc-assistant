@@ -10,8 +10,10 @@ from prompt_utils import format_prompt
 from legalprompt import system_prompt
 from live_news import fetch_legal_news
 from web_scraper import scrape_url
-from fastapi import FastAPI, File, UploadFile, Form
+from logger import logger
+from urllib.parse import unquote
 import re
+
 url_pattern = re.compile(r'https?://\S+')
 
 app = FastAPI()
@@ -27,61 +29,81 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
+    logger.info("Root endpoint hit - API is running")
     return {"message": "Legal AI Assistant API is running!"}
-
 
 
 @app.post("/upload")
 async def upload_file(files: list[UploadFile] = File(...)):
     try:
+        logger.info(f"📂 Upload requested for {len(files)} file(s)")
         results = []
         for file in files:
             content = await file.read()
             page_chunks = extract_text_from_file(file.filename, content)
             status = build_and_save_index(page_chunks)  
             results.append(status)
+            logger.info(f"✅ File uploaded: {file.filename}, status={status}")
 
-        clear_chat_history()  # reset on new upload
+        clear_chat_history()
+        logger.info("Chat history cleared after upload")
         return {"results": results}
 
     except Exception as e:
+        logger.exception(f"❌ Error uploading files: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# GET latest legal news
+
 @app.get("/news")
 async def get_news(query: str = "law"):
-    return await fetch_legal_news(query)
+    logger.info(f"Fetching news with query={query}")
+    try:
+        return await fetch_legal_news(query)
+    except Exception as e:
+        logger.exception(f"❌ Error fetching news: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-# POST: scrape from URL
+
 @app.post("/scrape")
 async def scrape_from_url(url: str = Form(...)):
-    result = await scrape_url(url)
+    logger.info(f"Scraping requested for: {url}")
+    scraped = await scrape_url(url)
 
-    # Handle blocked/redirected sites
-    if "error" in result and "Redirect" in result["error"]:
-        return {
-            "error": "⚠️ This site blocks web scraping. Please use a supported site or provide another source."
-        }
+    if "error" in scraped:
+        logger.warning(f"Scraping error for {url}: {scraped['error']}")
+        if "Redirect" in scraped["error"]:
+            return {"error": "This site blocks web scraping. Please use another source."}
+        return scraped
 
-    return result
+    content = scraped.get("content", "")
+    if not content.strip():
+        logger.warning(f"No content extracted from {url}")
+        return {"error": "No content extracted from the given URL."}
+
+    page_chunks = [(content, 1, f"Web:{url}")]
+    status = build_and_save_index(page_chunks)
+
+    logger.info(f"✅ Web content stored for {url}, status={status}")
+    return {
+        "url": url,
+        "content": content
+    }
 
 
 @app.post("/ask")
 async def ask_question(question: str = Form(...)):
     try:
-        print(f"📨 Question received: {question}")
+        logger.info(f"📨 Question received: {question}")
 
-        # Always check available files
         files = list_files()
-        print(f"📂 Files available in Qdrant: {files}")
+        logger.info(f"📂 Files available in Qdrant: {files}")
 
-        # Search in vector DB
         top_chunks, similarity_score = search_similar_chunks(question)
         history_context = get_chat_context()
 
-        # Handle greetings
         greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
         if question.strip().lower() in greetings:
+            logger.info("Greeting detected")
             greeting_text = "Hello! How can I help you with your uploaded documents today?"
             return StreamingResponse(stream_answer(greeting_text), media_type="text/plain")
 
@@ -89,13 +111,14 @@ async def ask_question(question: str = Form(...)):
             url = url_pattern.search(question).group(0)
             scraped = await scrape_url(url)
             if "content" in scraped:
+                logger.info(f"✅ Scraped inline URL: {url}")
                 prompt = f"Summarize and answer based on this webpage:\n\n{scraped['content']}\n\nQuestion: {question}"
                 update_chat_history(question)
                 return StreamingResponse(stream_answer(prompt), media_type="text/plain")
             else:
+                logger.error(f"❌ Failed to scrape URL in question: {url}")
                 return JSONResponse({"error": "Failed to scrape URL"})
 
-        # Case A: Relevant chunks found
         if top_chunks and similarity_score >= 0.10:
             context_parts = []
             for chunk in top_chunks:
@@ -105,10 +128,11 @@ async def ask_question(question: str = Form(...)):
 
             prompt = format_prompt(context, question, history_context)
             update_chat_history(question)
+            logger.info("✅ Answer generated from relevant chunks")
             return StreamingResponse(stream_answer(prompt), media_type="text/plain")
 
-        # Case B: Files exist but no relevant info
         if files:
+            logger.warning("⚠️ Files exist but no relevant info found")
             prompt = (
                 f"{system_prompt}\n\n"
                 f"{history_context}\n\n"
@@ -118,38 +142,43 @@ async def ask_question(question: str = Form(...)):
             update_chat_history(question)
             return StreamingResponse(stream_answer(prompt), media_type="text/plain")
 
-        # Case C: No files at all
+        logger.warning("⚠️ No files found at all")
         return JSONResponse({"message": "⚠️ No legal documents found. Please upload a document to begin."})
 
     except Exception as e:
-        print(f"❌ Error in /ask: {str(e)}")
+        logger.exception(f"❌ Error in /ask: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
-
 
 
 @app.get("/files")
 async def get_files():
     try:
-        return list_files()
+        files = list_files()
+        logger.info("📂 Files listed")
+        return files
     except Exception as e:
+        logger.exception(f"❌ Error listing files: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-
-@app.delete("/delete/{file_name}")
+@app.delete("/delete/{file_name:path}")
 async def delete_file(file_name: str):
     try:
-        delete_file_chunks(file_name)
-        return {"message": f"File '{file_name}' deleted successfully."}
+        decoded_name = unquote(file_name)
+        logger.info(f"🗑️ Deleting file: {decoded_name}")
+        delete_file_chunks(decoded_name)
+        return {"message": f"File '{decoded_name}' deleted successfully."}
     except Exception as e:
+        logger.error(f"❌ Delete failed for {file_name}: {e}")
         return JSONResponse(status_code=500, content={"error": f"Error deleting file: {str(e)}"})
-
 
 
 @app.delete("/clear")
 async def clear_history():
-    clear_chat_history()
-    return {"message": "Chat history cleared"}
-
-
-
+    try:
+        clear_chat_history()
+        logger.info("✅ Chat history cleared")
+        return {"message": "Chat history cleared"}
+    except Exception as e:
+        logger.exception(f"❌ Error clearing history: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})

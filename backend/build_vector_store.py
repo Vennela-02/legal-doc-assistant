@@ -6,7 +6,10 @@ import os
 import uuid
 
 
-COLLECTION_NAME = "legal_chunks"
+
+def get_collection_name() -> str:
+    return os.getenv("QDRANT_COLLECTION", "legal_chunks")
+
 EMBEDDER_MODEL = "all-MiniLM-L6-v2"
 
 
@@ -15,7 +18,7 @@ def file_exists(client: QdrantClient, file_name: str) -> bool:
     Check if a file_name already exists in Qdrant.
     """
     results, _ = client.scroll(
-        collection_name=COLLECTION_NAME,
+        collection_name=get_collection_name(),
         scroll_filter=Filter(
             must=[FieldCondition(key="file_name", match=MatchValue(value=file_name))]
         ),
@@ -58,7 +61,7 @@ def build_and_save_index(pages: list):
     # Create collection if not exists (do not delete existing data)
     try:
         client.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=get_collection_name(),
             vectors_config=VectorParams(size=len(embeddings[0]), distance=Distance.COSINE)
         )
     except Exception:
@@ -82,7 +85,8 @@ def build_and_save_index(pages: list):
         for chunk, embedding in zip(chunks, embeddings)
     ]
 
-    client.upsert(collection_name=COLLECTION_NAME, points=points)
+    client.upsert(collection_name=get_collection_name(), points=points)
 
     print(f"✅ Chunks uploaded for file_name={file_name}")
     return {"file_name": file_name, "status": "uploaded"}
+

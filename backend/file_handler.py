@@ -7,6 +7,11 @@ from typing import List, Tuple
 from pdf2image import convert_from_bytes
 import pytesseract
 from PIL import Image
+from dotenv import load_dotenv
+load_dotenv()
+
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "tesseract")
+POPPLER_PATH = os.getenv("POPPLER_PATH", "/usr/bin")
 
 def extract_text_from_file(filename: str, content: bytes) -> List[Tuple[str, int, str]]:
     ext = os.path.splitext(filename)[1].lower()
@@ -26,22 +31,26 @@ def extract_text_from_file(filename: str, content: bytes) -> List[Tuple[str, int
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
-# --- Each function returns List[(page_text, page_number, source)] ---
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+
+# Apply Tesseract path
+pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_CMD")
+POPPLER_PATH = os.getenv("POPPLER_PATH")
 
 def extract_text_with_ocr_from_bytes(content: bytes) -> List[Tuple[str, int]]:
     """Run OCR on every page and return (text, page_number)."""
-    pages = convert_from_bytes(
-        content, 
-        dpi=300, 
-        poppler_path=r'C:\Users\Admin\Downloads\Release-24.08.0-0\poppler-24.08.0\Library\bin'
-    )
+    
+    if POPPLER_PATH:  
+        pages = convert_from_bytes(content, dpi=300, poppler_path=POPPLER_PATH)
+    else:  
+        pages = convert_from_bytes(content, dpi=300)
+
     ocr_pages = []
     for i, page_img in enumerate(pages):
         text = pytesseract.image_to_string(page_img)
         ocr_pages.append((text.strip(), i + 1))
-    return ocr_pages
 
+    return ocr_pages
 
 
 def extract_text_from_pdf(content: bytes, source: str) -> List[Tuple[str, int, str]]:
